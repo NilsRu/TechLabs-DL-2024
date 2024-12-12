@@ -1,0 +1,468 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "6c9f4764-dd71-4dea-863f-c51c0809859c",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import numpy as np\n",
+    "import tensorflow as tf\n",
+    "from tensorflow.keras.preprocessing.image import ImageDataGenerator\n",
+    "from tensorflow.keras import layers, models\n",
+    "from sklearn.metrics import classification_report, confusion_matrix\n",
+    "import matplotlib.pyplot as plt\n",
+    "import ipywidgets as widgets\n",
+    "from IPython.display import display\n",
+    "from tensorflow.keras.preprocessing import image\n",
+    "from PIL import Image\n",
+    "import io\n",
+    "from datetime import datetime\n",
+    "import tensorflow as tf\n",
+    "from tensorflow.keras import layers, models"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "9b3c4463-0a3e-4896-923a-6b9e293cb164",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Pay attemtion to the path \n",
+    "base_dir = '../real_vs_fake/real-vs-fake'\n",
+    "#|--project\n",
+    "#|-----TechLabs-DL-2024\n",
+    "#|----------model.ipynb\n",
+    "#|----------README.md\n",
+    "#|-----real-vs-fake\n",
+    "#|----------test\n",
+    "#|----------train\n",
+    "#|----------valid\n",
+    "\n",
+    "train_dir = os.path.join(base_dir, 'train')\n",
+    "valid_dir = os.path.join(base_dir, 'valid')\n",
+    "test_dir = os.path.join(base_dir, 'test')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "id": "20489172-5bd3-4a0b-addd-3e574891d992",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Found 102041 images belonging to 2 classes.\n",
+      "Found 20000 images belonging to 2 classes.\n",
+      "Found 20000 images belonging to 2 classes.\n"
+     ]
+    }
+   ],
+   "source": [
+    "batch_size = 20\n",
+    "img_size = (150, 150)\n",
+    "sample_count = 1000\n",
+    "\n",
+    "train_datagen = ImageDataGenerator(rescale=1./255)\n",
+    "valid_datagen = ImageDataGenerator(rescale=1./255)\n",
+    "test_datagen = ImageDataGenerator(rescale=1./255)\n",
+    "\n",
+    "train_generator = train_datagen.flow_from_directory(\n",
+    "    train_dir,\n",
+    "    target_size=img_size,\n",
+    "    batch_size=batch_size,\n",
+    "    class_mode='binary',\n",
+    "    classes=['real', 'fake'],\n",
+    "    shuffle=True,\n",
+    "    subset=None,\n",
+    "    seed=42\n",
+    ")\n",
+    "\n",
+    "valid_generator = valid_datagen.flow_from_directory(\n",
+    "    valid_dir,\n",
+    "    target_size=img_size,\n",
+    "    batch_size=batch_size,\n",
+    "    class_mode='binary',\n",
+    "    classes=['real', 'fake'],\n",
+    "    shuffle=True,\n",
+    "    subset=None,\n",
+    "    seed=42\n",
+    ")\n",
+    "\n",
+    "test_generator = test_datagen.flow_from_directory(\n",
+    "    test_dir,\n",
+    "    target_size=img_size,\n",
+    "    batch_size=batch_size,\n",
+    "    class_mode='binary',\n",
+    "    classes=['real', 'fake'],\n",
+    "    shuffle=False\n",
+    ")\n",
+    "\n",
+    "train_generator.samples = 2 * sample_count  \n",
+    "train_generator.batch_size = batch_size"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "id": "ec11eb11-5f4a-4034-bc7f-d8afb889cb50",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Load the InceptionV3 model (close to GoogLeNet)\n",
+    "base_model = tf.keras.applications.InceptionV3(\n",
+    "    weights='imagenet', \n",
+    "    include_top=False,  # We don't need the top layer (fully connected layer)\n",
+    "    input_shape=(150, 150, 3)  # Input shape to match your images\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "id": "2696ebea-cae3-471a-822f-0c14e200f2bc",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for layer in base_model.layers:\n",
+    "    layer.trainable = False"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "id": "761e073c-7955-4d1a-80cd-760e27fb16db",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "WARNING:absl:At this time, the v2.11+ optimizer `tf.keras.optimizers.Adam` runs slowly on M1/M2 Macs, please use the legacy Keras optimizer instead, located at `tf.keras.optimizers.legacy.Adam`.\n",
+      "WARNING:absl:There is a known slowdown when using v2.11+ Keras optimizers on M1/M2 Macs. Falling back to the legacy Keras optimizer, i.e., `tf.keras.optimizers.legacy.Adam`.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Add custom layers on top of the base model\n",
+    "model = models.Sequential([\n",
+    "    base_model,  # Add the base model as the first layer\n",
+    "    \n",
+    "    # 1. Convolutional layer inspired by NAS\n",
+    "    layers.Conv2D(384, (1, 1), padding='same', activation='relu'),\n",
+    "    \n",
+    "    # 2. Separable Convolution Layer\n",
+    "    layers.SeparableConv2D(384, (5, 5), padding='same', activation='relu'),\n",
+    "    layers.BatchNormalization(),\n",
+    "    \n",
+    "    # 3. Global average pooling\n",
+    "    layers.GlobalAveragePooling2D(),\n",
+    "    \n",
+    "    # 4. Dropout for regularization\n",
+    "    layers.Dropout(0.5),\n",
+    "    \n",
+    "    # 5. Dense layer with more neurons and activation\n",
+    "    layers.Dense(1024, activation='relu'),\n",
+    "    \n",
+    "    # 6. Final output layer for binary classification\n",
+    "    layers.Dense(1, activation='sigmoid')\n",
+    "])\n",
+    "\n",
+    "\n",
+    "\n",
+    "# Compile the model\n",
+    "model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.003), ## 0.003 was quite good\n",
+    "              loss='binary_crossentropy',\n",
+    "              metrics=['accuracy'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "id": "59dd7cf2-bfb9-4f5e-82f8-9cb903bbd3dc",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "callbacks = [\n",
+    "    # Reduce learning rate when validation loss plateaus\n",
+    "    tf.keras.callbacks.ReduceLROnPlateau(\n",
+    "        monitor='val_loss', \n",
+    "        factor=0.1,  # Reduce the learning rate by a factor of 10\n",
+    "        patience=5,  # Number of epochs with no improvement after which learning rate will be reduced\n",
+    "        verbose=1,   # Print a message when learning rate is reduced\n",
+    "        min_lr=1e-6  # Set a floor on the learning rate to prevent it from going too low\n",
+    "    ),\n",
+    "    \n",
+    "    # Stop training if the validation loss does not improve for 10 epochs\n",
+    "    tf.keras.callbacks.EarlyStopping(\n",
+    "        monitor='val_loss', \n",
+    "        patience=10,  # Number of epochs with no improvement after which training will be stopped\n",
+    "        restore_best_weights=True,  # Restores model weights from the epoch with the best validation loss\n",
+    "        verbose=1  # Print a message when training stops early\n",
+    "    )\n",
+    "]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "id": "e5e1d2c3-528e-4594-8950-ed8a0a3d68cb",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Epoch 1/30\n",
+      "  1/100 [..............................] - ETA: 16s - loss: 0.7436 - accuracy: 0.5500"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "2024-09-01 19:03:19.162669: I tensorflow/core/common_runtime/executor.cc:1197] [/device:CPU:0] (DEBUG INFO) Executor start aborting (this does not indicate an error and you can ignore this message): INVALID_ARGUMENT: You must feed a value for placeholder tensor 'Placeholder/_0' with dtype int32\n",
+      "\t [[{{node Placeholder/_0}}]]\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "100/100 [==============================] - 26s 265ms/step - loss: 0.5888 - accuracy: 0.6895 - val_loss: 0.5790 - val_accuracy: 0.6970 - lr: 0.0030\n",
+      "Epoch 2/30\n",
+      "100/100 [==============================] - 30s 297ms/step - loss: 0.5711 - accuracy: 0.7080 - val_loss: 0.6206 - val_accuracy: 0.6670 - lr: 0.0030\n",
+      "Epoch 3/30\n",
+      "100/100 [==============================] - 30s 304ms/step - loss: 0.5572 - accuracy: 0.7260 - val_loss: 0.5241 - val_accuracy: 0.7410 - lr: 0.0030\n",
+      "Epoch 4/30\n",
+      "100/100 [==============================] - 30s 298ms/step - loss: 0.5802 - accuracy: 0.7020 - val_loss: 0.5402 - val_accuracy: 0.7460 - lr: 0.0030\n",
+      "Epoch 5/30\n",
+      "100/100 [==============================] - 29s 294ms/step - loss: 0.5594 - accuracy: 0.7100 - val_loss: 0.5833 - val_accuracy: 0.6890 - lr: 0.0030\n",
+      "Epoch 6/30\n",
+      "100/100 [==============================] - 29s 293ms/step - loss: 0.5311 - accuracy: 0.7390 - val_loss: 0.5701 - val_accuracy: 0.7120 - lr: 0.0030\n",
+      "Epoch 7/30\n",
+      "100/100 [==============================] - 29s 293ms/step - loss: 0.5478 - accuracy: 0.7250 - val_loss: 0.5644 - val_accuracy: 0.7120 - lr: 0.0030\n",
+      "Epoch 8/30\n",
+      "100/100 [==============================] - ETA: 0s - loss: 0.5366 - accuracy: 0.7360\n",
+      "Epoch 8: ReduceLROnPlateau reducing learning rate to 0.00030000000260770325.\n",
+      "100/100 [==============================] - 29s 294ms/step - loss: 0.5366 - accuracy: 0.7360 - val_loss: 0.5556 - val_accuracy: 0.7350 - lr: 0.0030\n",
+      "Epoch 9/30\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.5262 - accuracy: 0.7480 - val_loss: 0.4988 - val_accuracy: 0.7540 - lr: 3.0000e-04\n",
+      "Epoch 10/30\n",
+      "100/100 [==============================] - 29s 294ms/step - loss: 0.5170 - accuracy: 0.7410 - val_loss: 0.5131 - val_accuracy: 0.7470 - lr: 3.0000e-04\n",
+      "Epoch 11/30\n",
+      "100/100 [==============================] - 29s 293ms/step - loss: 0.5061 - accuracy: 0.7575 - val_loss: 0.5207 - val_accuracy: 0.7470 - lr: 3.0000e-04\n",
+      "Epoch 12/30\n",
+      "100/100 [==============================] - 29s 294ms/step - loss: 0.5156 - accuracy: 0.7500 - val_loss: 0.5214 - val_accuracy: 0.7330 - lr: 3.0000e-04\n",
+      "Epoch 13/30\n",
+      "100/100 [==============================] - 29s 293ms/step - loss: 0.5235 - accuracy: 0.7450 - val_loss: 0.4949 - val_accuracy: 0.7570 - lr: 3.0000e-04\n",
+      "Epoch 14/30\n",
+      "100/100 [==============================] - 30s 297ms/step - loss: 0.5210 - accuracy: 0.7420 - val_loss: 0.5026 - val_accuracy: 0.7550 - lr: 3.0000e-04\n",
+      "Epoch 15/30\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.5144 - accuracy: 0.7475 - val_loss: 0.5238 - val_accuracy: 0.7270 - lr: 3.0000e-04\n",
+      "Epoch 16/30\n",
+      "100/100 [==============================] - 30s 299ms/step - loss: 0.4927 - accuracy: 0.7655 - val_loss: 0.5045 - val_accuracy: 0.7520 - lr: 3.0000e-04\n",
+      "Epoch 17/30\n",
+      "100/100 [==============================] - 30s 297ms/step - loss: 0.5290 - accuracy: 0.7510 - val_loss: 0.4814 - val_accuracy: 0.7720 - lr: 3.0000e-04\n",
+      "Epoch 18/30\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.4956 - accuracy: 0.7610 - val_loss: 0.5030 - val_accuracy: 0.7550 - lr: 3.0000e-04\n",
+      "Epoch 19/30\n",
+      "100/100 [==============================] - 29s 294ms/step - loss: 0.5212 - accuracy: 0.7435 - val_loss: 0.5250 - val_accuracy: 0.7440 - lr: 3.0000e-04\n",
+      "Epoch 20/30\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.5128 - accuracy: 0.7460 - val_loss: 0.5186 - val_accuracy: 0.7500 - lr: 3.0000e-04\n",
+      "Epoch 21/30\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.5073 - accuracy: 0.7605 - val_loss: 0.5080 - val_accuracy: 0.7410 - lr: 3.0000e-04\n",
+      "Epoch 22/30\n",
+      "100/100 [==============================] - ETA: 0s - loss: 0.4819 - accuracy: 0.7690\n",
+      "Epoch 22: ReduceLROnPlateau reducing learning rate to 3.000000142492354e-05.\n",
+      "100/100 [==============================] - 29s 295ms/step - loss: 0.4819 - accuracy: 0.7690 - val_loss: 0.4913 - val_accuracy: 0.7600 - lr: 3.0000e-04\n",
+      "Epoch 23/30\n",
+      "100/100 [==============================] - 30s 296ms/step - loss: 0.5081 - accuracy: 0.7590 - val_loss: 0.4847 - val_accuracy: 0.7700 - lr: 3.0000e-05\n",
+      "Epoch 24/30\n",
+      "100/100 [==============================] - 30s 300ms/step - loss: 0.4750 - accuracy: 0.7800 - val_loss: 0.4550 - val_accuracy: 0.7680 - lr: 3.0000e-05\n",
+      "Epoch 25/30\n",
+      "100/100 [==============================] - 30s 296ms/step - loss: 0.5025 - accuracy: 0.7640 - val_loss: 0.4892 - val_accuracy: 0.7540 - lr: 3.0000e-05\n",
+      "Epoch 26/30\n",
+      "100/100 [==============================] - 30s 296ms/step - loss: 0.4977 - accuracy: 0.7620 - val_loss: 0.4792 - val_accuracy: 0.7640 - lr: 3.0000e-05\n",
+      "Epoch 27/30\n",
+      "100/100 [==============================] - 30s 300ms/step - loss: 0.4916 - accuracy: 0.7570 - val_loss: 0.4795 - val_accuracy: 0.7800 - lr: 3.0000e-05\n",
+      "Epoch 28/30\n",
+      "100/100 [==============================] - 30s 299ms/step - loss: 0.5287 - accuracy: 0.7425 - val_loss: 0.4896 - val_accuracy: 0.7600 - lr: 3.0000e-05\n",
+      "Epoch 29/30\n",
+      "100/100 [==============================] - ETA: 0s - loss: 0.4846 - accuracy: 0.7670\n",
+      "Epoch 29: ReduceLROnPlateau reducing learning rate to 3.000000106112566e-06.\n",
+      "100/100 [==============================] - 30s 303ms/step - loss: 0.4846 - accuracy: 0.7670 - val_loss: 0.4878 - val_accuracy: 0.7560 - lr: 3.0000e-05\n",
+      "Epoch 30/30\n",
+      "100/100 [==============================] - 31s 314ms/step - loss: 0.5046 - accuracy: 0.7620 - val_loss: 0.4796 - val_accuracy: 0.7570 - lr: 3.0000e-06\n"
+     ]
+    }
+   ],
+   "source": [
+    "history = model.fit(\n",
+    "    train_generator,\n",
+    "    steps_per_epoch=sample_count // batch_size * 2,  # number of batches per epoch\n",
+    "    epochs=30,\n",
+    "    validation_data=valid_generator,\n",
+    "    validation_steps=sample_count // batch_size,\n",
+    "    callbacks=callbacks  # Use the callbacks defined above\n",
+    "\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "id": "8924657b-3de0-499a-9f57-1d91423542e2",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Evaluating on Test Set:\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "2024-09-01 19:18:04.447867: I tensorflow/core/common_runtime/executor.cc:1197] [/device:CPU:0] (DEBUG INFO) Executor start aborting (this does not indicate an error and you can ignore this message): INVALID_ARGUMENT: You must feed a value for placeholder tensor 'Placeholder/_0' with dtype int32\n",
+      "\t [[{{node Placeholder/_0}}]]\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "1000/1000 [==============================] - 206s 206ms/step - loss: 0.4918 - accuracy: 0.7643\n",
+      "Test Accuracy: 0.76\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "2024-09-01 19:21:30.117958: I tensorflow/core/common_runtime/executor.cc:1197] [/device:CPU:0] (DEBUG INFO) Executor start aborting (this does not indicate an error and you can ignore this message): INVALID_ARGUMENT: You must feed a value for placeholder tensor 'Placeholder/_0' with dtype int32\n",
+      "\t [[{{node Placeholder/_0}}]]\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "1000/1000 [==============================] - 278s 277ms/step\n",
+      "Confusion Matrix - Test Set\n",
+      "[[7569 2431]\n",
+      " [2282 7718]]\n",
+      "Classification Report - Test Set\n",
+      "              precision    recall  f1-score   support\n",
+      "\n",
+      "        Real       0.77      0.76      0.76     10000\n",
+      "        Fake       0.76      0.77      0.77     10000\n",
+      "\n",
+      "    accuracy                           0.76     20000\n",
+      "   macro avg       0.76      0.76      0.76     20000\n",
+      "weighted avg       0.76      0.76      0.76     20000\n",
+      "\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Evaluate on the Test Set\n",
+    "print(\"Evaluating on Test Set:\")\n",
+    "test_loss, test_acc = model.evaluate(test_generator, steps=test_generator.samples // test_generator.batch_size)\n",
+    "print(f\"Test Accuracy: {test_acc:.2f}\")\n",
+    "\n",
+    "Y_pred_test = model.predict(test_generator)\n",
+    "y_pred_test = np.round(Y_pred_test).astype(int)\n",
+    "\n",
+    "print('Confusion Matrix - Test Set')\n",
+    "print(confusion_matrix(test_generator.classes, y_pred_test))\n",
+    "\n",
+    "print('Classification Report - Test Set')\n",
+    "print(classification_report(test_generator.classes, y_pred_test, target_names=['Real', 'Fake']))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "699f64a8-4a1b-4193-a642-9ce099ca5913",
+   "metadata": {},
+   "outputs": [
+    {
+     "ename": "ValueError",
+     "evalue": "x and y must have same first dimension, but have shapes (10,) and (20,)",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[0;31mValueError\u001b[0m                                Traceback (most recent call last)",
+      "Cell \u001b[0;32mIn[9], line 10\u001b[0m\n\u001b[1;32m      8\u001b[0m plt\u001b[38;5;241m.\u001b[39mfigure(figsize\u001b[38;5;241m=\u001b[39m(\u001b[38;5;241m8\u001b[39m, \u001b[38;5;241m8\u001b[39m))\n\u001b[1;32m      9\u001b[0m plt\u001b[38;5;241m.\u001b[39msubplot(\u001b[38;5;241m1\u001b[39m, \u001b[38;5;241m2\u001b[39m, \u001b[38;5;241m1\u001b[39m)\n\u001b[0;32m---> 10\u001b[0m plt\u001b[38;5;241m.\u001b[39mplot(epochs_range, acc, label\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m'\u001b[39m\u001b[38;5;124mTraining Accuracy\u001b[39m\u001b[38;5;124m'\u001b[39m)\n\u001b[1;32m     11\u001b[0m plt\u001b[38;5;241m.\u001b[39mplot(epochs_range, val_acc, label\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m'\u001b[39m\u001b[38;5;124mValidation Accuracy\u001b[39m\u001b[38;5;124m'\u001b[39m)\n\u001b[1;32m     12\u001b[0m plt\u001b[38;5;241m.\u001b[39mlegend(loc\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m'\u001b[39m\u001b[38;5;124mlower right\u001b[39m\u001b[38;5;124m'\u001b[39m)\n",
+      "File \u001b[0;32m~/anaconda3/envs/Tensorflow/lib/python3.11/site-packages/matplotlib/pyplot.py:3590\u001b[0m, in \u001b[0;36mplot\u001b[0;34m(scalex, scaley, data, *args, **kwargs)\u001b[0m\n\u001b[1;32m   3582\u001b[0m \u001b[38;5;129m@_copy_docstring_and_deprecators\u001b[39m(Axes\u001b[38;5;241m.\u001b[39mplot)\n\u001b[1;32m   3583\u001b[0m \u001b[38;5;28;01mdef\u001b[39;00m \u001b[38;5;21mplot\u001b[39m(\n\u001b[1;32m   3584\u001b[0m     \u001b[38;5;241m*\u001b[39margs: \u001b[38;5;28mfloat\u001b[39m \u001b[38;5;241m|\u001b[39m ArrayLike \u001b[38;5;241m|\u001b[39m \u001b[38;5;28mstr\u001b[39m,\n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m   3588\u001b[0m     \u001b[38;5;241m*\u001b[39m\u001b[38;5;241m*\u001b[39mkwargs,\n\u001b[1;32m   3589\u001b[0m ) \u001b[38;5;241m-\u001b[39m\u001b[38;5;241m>\u001b[39m \u001b[38;5;28mlist\u001b[39m[Line2D]:\n\u001b[0;32m-> 3590\u001b[0m     \u001b[38;5;28;01mreturn\u001b[39;00m gca()\u001b[38;5;241m.\u001b[39mplot(\n\u001b[1;32m   3591\u001b[0m         \u001b[38;5;241m*\u001b[39margs,\n\u001b[1;32m   3592\u001b[0m         scalex\u001b[38;5;241m=\u001b[39mscalex,\n\u001b[1;32m   3593\u001b[0m         scaley\u001b[38;5;241m=\u001b[39mscaley,\n\u001b[1;32m   3594\u001b[0m         \u001b[38;5;241m*\u001b[39m\u001b[38;5;241m*\u001b[39m({\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mdata\u001b[39m\u001b[38;5;124m\"\u001b[39m: data} \u001b[38;5;28;01mif\u001b[39;00m data \u001b[38;5;129;01mis\u001b[39;00m \u001b[38;5;129;01mnot\u001b[39;00m \u001b[38;5;28;01mNone\u001b[39;00m \u001b[38;5;28;01melse\u001b[39;00m {}),\n\u001b[1;32m   3595\u001b[0m         \u001b[38;5;241m*\u001b[39m\u001b[38;5;241m*\u001b[39mkwargs,\n\u001b[1;32m   3596\u001b[0m     )\n",
+      "File \u001b[0;32m~/anaconda3/envs/Tensorflow/lib/python3.11/site-packages/matplotlib/axes/_axes.py:1724\u001b[0m, in \u001b[0;36mAxes.plot\u001b[0;34m(self, scalex, scaley, data, *args, **kwargs)\u001b[0m\n\u001b[1;32m   1481\u001b[0m \u001b[38;5;250m\u001b[39m\u001b[38;5;124;03m\"\"\"\u001b[39;00m\n\u001b[1;32m   1482\u001b[0m \u001b[38;5;124;03mPlot y versus x as lines and/or markers.\u001b[39;00m\n\u001b[1;32m   1483\u001b[0m \n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m   1721\u001b[0m \u001b[38;5;124;03m(``'green'``) or hex strings (``'#008000'``).\u001b[39;00m\n\u001b[1;32m   1722\u001b[0m \u001b[38;5;124;03m\"\"\"\u001b[39;00m\n\u001b[1;32m   1723\u001b[0m kwargs \u001b[38;5;241m=\u001b[39m cbook\u001b[38;5;241m.\u001b[39mnormalize_kwargs(kwargs, mlines\u001b[38;5;241m.\u001b[39mLine2D)\n\u001b[0;32m-> 1724\u001b[0m lines \u001b[38;5;241m=\u001b[39m [\u001b[38;5;241m*\u001b[39m\u001b[38;5;28mself\u001b[39m\u001b[38;5;241m.\u001b[39m_get_lines(\u001b[38;5;28mself\u001b[39m, \u001b[38;5;241m*\u001b[39margs, data\u001b[38;5;241m=\u001b[39mdata, \u001b[38;5;241m*\u001b[39m\u001b[38;5;241m*\u001b[39mkwargs)]\n\u001b[1;32m   1725\u001b[0m \u001b[38;5;28;01mfor\u001b[39;00m line \u001b[38;5;129;01min\u001b[39;00m lines:\n\u001b[1;32m   1726\u001b[0m     \u001b[38;5;28mself\u001b[39m\u001b[38;5;241m.\u001b[39madd_line(line)\n",
+      "File \u001b[0;32m~/anaconda3/envs/Tensorflow/lib/python3.11/site-packages/matplotlib/axes/_base.py:303\u001b[0m, in \u001b[0;36m_process_plot_var_args.__call__\u001b[0;34m(self, axes, data, *args, **kwargs)\u001b[0m\n\u001b[1;32m    301\u001b[0m     this \u001b[38;5;241m+\u001b[39m\u001b[38;5;241m=\u001b[39m args[\u001b[38;5;241m0\u001b[39m],\n\u001b[1;32m    302\u001b[0m     args \u001b[38;5;241m=\u001b[39m args[\u001b[38;5;241m1\u001b[39m:]\n\u001b[0;32m--> 303\u001b[0m \u001b[38;5;28;01myield from\u001b[39;00m \u001b[38;5;28mself\u001b[39m\u001b[38;5;241m.\u001b[39m_plot_args(\n\u001b[1;32m    304\u001b[0m     axes, this, kwargs, ambiguous_fmt_datakey\u001b[38;5;241m=\u001b[39mambiguous_fmt_datakey)\n",
+      "File \u001b[0;32m~/anaconda3/envs/Tensorflow/lib/python3.11/site-packages/matplotlib/axes/_base.py:499\u001b[0m, in \u001b[0;36m_process_plot_var_args._plot_args\u001b[0;34m(self, axes, tup, kwargs, return_kwargs, ambiguous_fmt_datakey)\u001b[0m\n\u001b[1;32m    496\u001b[0m     axes\u001b[38;5;241m.\u001b[39myaxis\u001b[38;5;241m.\u001b[39mupdate_units(y)\n\u001b[1;32m    498\u001b[0m \u001b[38;5;28;01mif\u001b[39;00m x\u001b[38;5;241m.\u001b[39mshape[\u001b[38;5;241m0\u001b[39m] \u001b[38;5;241m!=\u001b[39m y\u001b[38;5;241m.\u001b[39mshape[\u001b[38;5;241m0\u001b[39m]:\n\u001b[0;32m--> 499\u001b[0m     \u001b[38;5;28;01mraise\u001b[39;00m \u001b[38;5;167;01mValueError\u001b[39;00m(\u001b[38;5;124mf\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mx and y must have same first dimension, but \u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m    500\u001b[0m                      \u001b[38;5;124mf\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mhave shapes \u001b[39m\u001b[38;5;132;01m{\u001b[39;00mx\u001b[38;5;241m.\u001b[39mshape\u001b[38;5;132;01m}\u001b[39;00m\u001b[38;5;124m and \u001b[39m\u001b[38;5;132;01m{\u001b[39;00my\u001b[38;5;241m.\u001b[39mshape\u001b[38;5;132;01m}\u001b[39;00m\u001b[38;5;124m\"\u001b[39m)\n\u001b[1;32m    501\u001b[0m \u001b[38;5;28;01mif\u001b[39;00m x\u001b[38;5;241m.\u001b[39mndim \u001b[38;5;241m>\u001b[39m \u001b[38;5;241m2\u001b[39m \u001b[38;5;129;01mor\u001b[39;00m y\u001b[38;5;241m.\u001b[39mndim \u001b[38;5;241m>\u001b[39m \u001b[38;5;241m2\u001b[39m:\n\u001b[1;32m    502\u001b[0m     \u001b[38;5;28;01mraise\u001b[39;00m \u001b[38;5;167;01mValueError\u001b[39;00m(\u001b[38;5;124mf\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mx and y can be no greater than 2D, but have \u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m    503\u001b[0m                      \u001b[38;5;124mf\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mshapes \u001b[39m\u001b[38;5;132;01m{\u001b[39;00mx\u001b[38;5;241m.\u001b[39mshape\u001b[38;5;132;01m}\u001b[39;00m\u001b[38;5;124m and \u001b[39m\u001b[38;5;132;01m{\u001b[39;00my\u001b[38;5;241m.\u001b[39mshape\u001b[38;5;132;01m}\u001b[39;00m\u001b[38;5;124m\"\u001b[39m)\n",
+      "\u001b[0;31mValueError\u001b[0m: x and y must have same first dimension, but have shapes (10,) and (20,)"
+     ]
+    },
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAAAVgAAAKZCAYAAAD9MDPMAAAAOXRFWHRTb2Z0d2FyZQBNYXRwbG90bGliIHZlcnNpb24zLjguNCwgaHR0cHM6Ly9tYXRwbG90bGliLm9yZy8fJSN1AAAACXBIWXMAAA9hAAAPYQGoP6dpAAAd0UlEQVR4nO3df2yW5b348U+h0KrntEaYFQQ79OjGRuZGCYxyyDKPdkHjQrITu7iIOk3W7AdCp2cwTnQQk2Y7mTlzE/ZD0CxB1/gz/tE5+8emKG7nwMqyDBIXYRa2ImmNLepOEbjPH35pvl2L61P6oYXzeiXPH8/ldT/Pddntnbt379yWFUVRBABjbtJ4LwDgbCWwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASUoO7AsvvBDXX399zJw5M8rKyuLpp5/+u8c8//zzUVdXF5WVlXHppZfGD3/4w9GsFeCMUnJg33777bjyyivjBz/4wYjm79u3L6699tpYunRpdHR0xDe/+c1YuXJlPPHEEyUvFuBMUnYqD3spKyuLp556KpYvX37SOd/4xjfimWeeiT179gyMNTU1xe9+97t4+eWXR/vVABNeefYXvPzyy9HQ0DBo7DOf+Uxs3rw53n333ZgyZcqQY/r7+6O/v3/g/fHjx+ONN96IadOmRVlZWfaSgf+DiqKIw4cPx8yZM2PSpLH581R6YA8ePBg1NTWDxmpqauLo0aPR3d0dM2bMGHJMS0tLrF+/PntpAEPs378/Zs2aNSaflR7YiBhy1nniqsTJzkbXrl0bzc3NA+97e3vjkksuif3790dVVVXeQoH/s/r6+mL27Nnxj//4j2P2memBveiii+LgwYODxg4dOhTl5eUxbdq0YY+pqKiIioqKIeNVVVUCC6Qay8uQ6ffBLl68ONrb2weNPffcc7FgwYJhr78CnC1KDuxbb70Vu3btil27dkXEe7dh7dq1Kzo7OyPivV/vV6xYMTC/qakpXnvttWhubo49e/bEli1bYvPmzXHnnXeOzQ4AJqiSLxHs2LEjPv3pTw+8P3Gt9Oabb46HH344urq6BmIbETFnzpxoa2uL1atXxwMPPBAzZ86M+++/Pz73uc+NwfIBJq5Tug/2dOnr64vq6uro7e11DRZIkdEZzyIASCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQJJRBXbjxo0xZ86cqKysjLq6uti2bdv7zt+6dWtceeWVce6558aMGTPi1ltvjZ6enlEtGOBMUXJgW1tbY9WqVbFu3bro6OiIpUuXxrJly6Kzs3PY+S+++GKsWLEibrvttvjDH/4Qjz32WPz3f/933H777ae8eICJrOTA3nfffXHbbbfF7bffHnPnzo3//M//jNmzZ8emTZuGnf/rX/86PvjBD8bKlStjzpw58c///M/xpS99KXbs2HHKiweYyEoK7JEjR2Lnzp3R0NAwaLyhoSG2b98+7DH19fVx4MCBaGtri6Io4vXXX4/HH388rrvuupN+T39/f/T19Q16AZxpSgpsd3d3HDt2LGpqagaN19TUxMGDB4c9pr6+PrZu3RqNjY0xderUuOiii+L888+P73//+yf9npaWlqiurh54zZ49u5RlAkwIo/ojV1lZ2aD3RVEMGTth9+7dsXLlyrj77rtj586d8eyzz8a+ffuiqanppJ+/du3a6O3tHXjt379/NMsEGFflpUyePn16TJ48ecjZ6qFDh4ac1Z7Q0tISS5YsibvuuisiIj72sY/FeeedF0uXLo177703ZsyYMeSYioqKqKioKGVpABNOSWewU6dOjbq6umhvbx803t7eHvX19cMe884778SkSYO/ZvLkyRHx3pkvwNmq5EsEzc3N8eCDD8aWLVtiz549sXr16ujs7Bz4lX/t2rWxYsWKgfnXX399PPnkk7Fp06bYu3dvvPTSS7Fy5cpYuHBhzJw5c+x2AjDBlHSJICKisbExenp6YsOGDdHV1RXz5s2Ltra2qK2tjYiIrq6uQffE3nLLLXH48OH4wQ9+EF//+tfj/PPPj6uuuiq+/e1vj90uACagsuIM+D29r68vqquro7e3N6qqqsZ7OcBZKKMznkUAkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCSjCuzGjRtjzpw5UVlZGXV1dbFt27b3nd/f3x/r1q2L2traqKioiMsuuyy2bNkyqgUDnCnKSz2gtbU1Vq1aFRs3bowlS5bEj370o1i2bFns3r07LrnkkmGPueGGG+L111+PzZs3xz/90z/FoUOH4ujRo6e8eICJrKwoiqKUAxYtWhTz58+PTZs2DYzNnTs3li9fHi0tLUPmP/vss/H5z38+9u7dGxdccMGoFtnX1xfV1dXR29sbVVVVo/oMgPeT0ZmSLhEcOXIkdu7cGQ0NDYPGGxoaYvv27cMe88wzz8SCBQviO9/5Tlx88cVxxRVXxJ133hl//etfR79qgDNASZcIuru749ixY1FTUzNovKamJg4ePDjsMXv37o0XX3wxKisr46mnnoru7u748pe/HG+88cZJr8P29/dHf3//wPu+vr5SlgkwIYzqj1xlZWWD3hdFMWTshOPHj0dZWVls3bo1Fi5cGNdee23cd9998fDDD5/0LLalpSWqq6sHXrNnzx7NMgHGVUmBnT59ekyePHnI2eqhQ4eGnNWeMGPGjLj44oujurp6YGzu3LlRFEUcOHBg2GPWrl0bvb29A6/9+/eXskyACaGkwE6dOjXq6uqivb190Hh7e3vU19cPe8ySJUviL3/5S7z11lsDY6+88kpMmjQpZs2aNewxFRUVUVVVNegFcKYp+RJBc3NzPPjgg7Fly5bYs2dPrF69Ojo7O6OpqSki3jv7XLFixcD8G2+8MaZNmxa33npr7N69O1544YW466674otf/GKcc845Y7cTgAmm5PtgGxsbo6enJzZs2BBdXV0xb968aGtri9ra2oiI6Orqis7OzoH5//AP/xDt7e3xta99LRYsWBDTpk2LG264Ie69996x2wXABFTyfbDjwX2wQLZxvw8WgJETWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkGVVgN27cGHPmzInKysqoq6uLbdu2jei4l156KcrLy+PjH//4aL4W4IxScmBbW1tj1apVsW7duujo6IilS5fGsmXLorOz832P6+3tjRUrVsS//Mu/jHqxAGeSsqIoilIOWLRoUcyfPz82bdo0MDZ37txYvnx5tLS0nPS4z3/+83H55ZfH5MmT4+mnn45du3aN+Dv7+vqiuro6ent7o6qqqpTlAoxIRmdKOoM9cuRI7Ny5MxoaGgaNNzQ0xPbt20963EMPPRSvvvpq3HPPPSP6nv7+/ujr6xv0AjjTlBTY7u7uOHbsWNTU1Awar6mpiYMHDw57zB//+MdYs2ZNbN26NcrLy0f0PS0tLVFdXT3wmj17dinLBJgQRvVHrrKyskHvi6IYMhYRcezYsbjxxhtj/fr1ccUVV4z489euXRu9vb0Dr/37949mmQDjamSnlP/P9OnTY/LkyUPOVg8dOjTkrDYi4vDhw7Fjx47o6OiIr371qxERcfz48SiKIsrLy+O5556Lq666ashxFRUVUVFRUcrSACacks5gp06dGnV1ddHe3j5ovL29Perr64fMr6qqit///vexa9eugVdTU1N86EMfil27dsWiRYtObfUAE1hJZ7AREc3NzXHTTTfFggULYvHixfHjH/84Ojs7o6mpKSLe+/X+z3/+c/z0pz+NSZMmxbx58wYdf+GFF0ZlZeWQcYCzTcmBbWxsjJ6entiwYUN0dXXFvHnzoq2tLWprayMioqur6+/eEwvwf0HJ98GOB/fBAtnG/T5YAEZOYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkAguQRGABkggsQBKBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiCJwAIkEViAJAILkERgAZIILEASgQVIIrAASQQWIInAAiQRWIAkowrsxo0bY86cOVFZWRl1dXWxbdu2k8598skn45prrokPfOADUVVVFYsXL45f/OIXo14wwJmi5MC2trbG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vFi6dGnce++9E+q3yNEYq8aM+xns2f4IxNHsL+K9M9dbbrklHnnkkQl9XavU/VVVVcXvf//72LVr18CrqakpPvShD8WuXbti0aJFp2vpIzaan+GSJUviL3/5S7z11lsDY6+88kpMmjQpZs2albreUo1mf++8886Q56ZOnjw5Isb2P7kyXsasMSX9SSzJiVtENm/eXOzevbtYtWpVcd555xV/+tOfiqIoijVr1hQ33XTTwPwTt1CsXr262L17d7F58+Yz4jatke7vkUceKcrLy4sHHnig6OrqGni9+eab47WF91Xq/v7WmXAXQal7PHz4cDFr1qziX//1X4s//OEPxfPPP19cfvnlxe233z5eW3hfpe7voYceKsrLy4uNGzcWr776avHiiy8WCxYsKBYuXDheW3hfhw8fLjo6OoqOjo4iIor77ruv6OjoGLgNLasxEyKwRVEUDzzwQFFbW1tMnTq1mD9/fvH8888P/LObb765+NSnPjVo/q9+9aviE5/4RDF16tTigx/8YLFp06bTvOLSlLK/T33qU0VEDHndfPPNp3/hI1Tqz+//dyYEtihK3+OePXuKq6++ujjnnHOKWbNmFc3NzcU777xzmlc9cqXu7/777y8+8pGPFOecc04xY8aM4gtf+EJx4MCB07zqkfnlL3/5vv+fymqMxxUCJBn3a7AAZyuBBUgisABJBBYgicACJBFYgCQCC5BEYAGSCCxAEoEFSCKwAEkEFiDJ/wJ3uLdDoXu+XwAAAABJRU5ErkJggg==",
+      "text/plain": [
+       "<Figure size 800x800 with 1 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "acc = history.history['accuracy']\n",
+    "val_acc = history.history['val_accuracy']\n",
+    "loss = history.history['loss']\n",
+    "val_loss = history.history['val_loss']\n",
+    "\n",
+    "epochs_range = range(10)\n",
+    "\n",
+    "plt.figure(figsize=(8, 8))\n",
+    "plt.subplot(1, 2, 1)\n",
+    "plt.plot(epochs_range, acc, label='Training Accuracy')\n",
+    "plt.plot(epochs_range, val_acc, label='Validation Accuracy')\n",
+    "plt.legend(loc='lower right')\n",
+    "plt.title('Training and Validation Accuracy')\n",
+    "\n",
+    "plt.subplot(1, 2, 2)\n",
+    "plt.plot(epochs_range, loss, label='Training Loss')\n",
+    "plt.plot(epochs_range, val_loss, label='Validation Loss')\n",
+    "plt.legend(loc='upper right')\n",
+    "plt.title('Training and Validation Loss')\n",
+    "plt.show()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
